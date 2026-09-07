@@ -1,0 +1,8 @@
+{
+  "name": "PhotoPro",
+  "description": "Passport photo sheet creator with AI background removal, crop, straighten, enhance, and multi-photo print layouts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
