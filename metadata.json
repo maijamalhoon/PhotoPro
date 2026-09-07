@@ -1,6 +1,6 @@
 {
   "name": "PhotoPro",
-  "description": "Passport photo sheet creator with AI background removal, crop, straighten, enhance, and multi-photo print layouts.",
+  "description": "Professional passport photo creator with AI background removal, intelligent face enhancement, blemish reduction, and 300 DPI print sheets for 4R and A4 paper.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
