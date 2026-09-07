@@ -9,6 +9,7 @@
 <meta property="og:description" content="Professional passport photo creator with AI background removal, intelligent face enhancement, blemish reduction, and 300 DPI print sheets for 4R and A4 paper.">
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/onnxruntime-web/1.10.0/ort.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://unpkg.com/lucide@latest"></script>
 <script src="model-data.js"></script>
 
@@ -568,6 +569,103 @@
     box-shadow: none;
   }
 
+  /* Batch Queue Styling */
+  .batch-thumb-item {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    border-radius: 6px;
+    border: 2px solid transparent;
+    cursor: pointer;
+    overflow: hidden;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+  }
+  .batch-thumb-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .batch-thumb-item.active {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px var(--primary-light);
+  }
+
+  /* Compare Before/After Modal */
+  .compare-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(4px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 9999;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+  }
+  .compare-modal-backdrop.open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .compare-modal-card {
+    background: #FFFFFF;
+    border-radius: var(--radius-lg);
+    box-shadow: 0 20px 25px -5px rgba(0,0,0,0.2), 0 10px 10px -5px rgba(0,0,0,0.04);
+    max-width: 600px;
+    width: 92%;
+    padding: 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .compare-split-container {
+    position: relative;
+    width: 100%;
+    max-width: 320px;
+    margin: 0 auto;
+    aspect-ratio: 35 / 45;
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    box-shadow: var(--shadow-md);
+    border: 1px solid var(--border-color);
+    user-select: none;
+  }
+  .compare-split-container canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+  .compare-slider-line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #FFFFFF;
+    box-shadow: 0 0 4px rgba(0,0,0,0.5);
+    cursor: ew-resize;
+  }
+  .compare-slider-handle {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 28px;
+    height: 28px;
+    background: #FFFFFF;
+    border: 2px solid var(--primary);
+    border-radius: 50%;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--primary);
+  }
+
   /* Print Media Query */
   @media print {
     body {
@@ -629,10 +727,19 @@
         <div id="dropzone">
           <i data-lucide="upload-cloud" class="dropzone-icon" style="width: 28px; height: 28px; margin: 0 auto 6px; display: block;"></i>
           <p class="dropzone-prompt" id="dropzonePrompt">Drop portrait or browse</p>
-          <p class="dropzone-subtext">JPG, PNG · Auto enhanced</p>
+          <p class="dropzone-subtext">JPG, PNG · Auto enhanced · Multi-photo queue supported</p>
           <img id="previewThumb" alt="Selected portrait preview" style="display:none; max-height: 100px; margin: 8px auto 0; border-radius: 6px;">
         </div>
-        <input type="file" id="fileInput" accept="image/*">
+        <input type="file" id="fileInput" accept="image/*" multiple>
+
+        <!-- Batch Photo Queue -->
+        <div id="batchQueueContainer" style="display: none; margin-top: 10px; padding: 8px 10px; background: #F4F4F5; border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+          <div style="display: flex; align-items: center; justify-content: space-between; font-size: 11.5px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px;">
+            <span style="display: flex; align-items: center; gap: 4px;"><i data-lucide="layers" class="icon-xs"></i> Queue (<span id="batchCount">0</span> photos)</span>
+            <button id="clearBatchBtn" class="btn-icon-small" style="font-size: 10px; width: auto; padding: 2px 8px; border-radius: 4px;">Clear All</button>
+          </div>
+          <div id="batchThumbnails" style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px;"></div>
+        </div>
 
         <!-- Crop & Positioning Interface -->
         <div id="cropSection">
@@ -801,6 +908,9 @@
             <button id="downloadSingleBtn" class="btn-chip" style="margin-top: 8px; font-size: 11px; padding: 5px 8px; width: 100%; justify-content: center; gap: 4px;" disabled>
               <i data-lucide="download" class="icon-xs"></i> Save Single
             </button>
+            <button id="compareBtn" class="btn-chip" style="margin-top: 4px; font-size: 11px; padding: 5px 8px; width: 100%; justify-content: center; gap: 4px;" disabled>
+              <i data-lucide="columns" class="icon-xs"></i> Compare Before/After
+            </button>
           </div>
 
           <!-- Printable Sheet Area -->
@@ -832,6 +942,10 @@
             <i data-lucide="file-image" class="icon-md"></i>
             <span>PNG</span>
           </button>
+          <button id="downloadSheetPdfBtn" class="btn-action btn-secondary" disabled>
+            <i data-lucide="file-text" class="icon-md"></i>
+            <span>PDF (300 DPI)</span>
+          </button>
           <button id="printSheetBtn" class="btn-action btn-secondary" disabled>
             <i data-lucide="printer" class="icon-md"></i>
             <span>Print</span>
@@ -840,6 +954,36 @@
       </div>
 
     </div>
+  </div>
+</div>
+
+<!-- Before / After Comparison Modal -->
+<div class="compare-modal-backdrop" id="compareModal">
+  <div class="compare-modal-card">
+    <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+      <h3 style="font-size: 16px; font-weight: 600; color: var(--text-main); display: flex; align-items: center; gap: 8px;">
+        <i data-lucide="columns" class="icon-md"></i> Before & After Comparison
+      </h3>
+      <button id="closeCompareBtn" class="btn-icon-small" style="font-size: 14px; width: 28px; height: 28px;">&times;</button>
+    </div>
+    <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--text-muted); padding: 0 8px;">
+      <span>Original Crop (Before)</span>
+      <span>Enhanced & Background Removed (After)</span>
+    </div>
+    <div class="compare-split-container" id="compareSplitContainer">
+      <canvas id="compareCanvasBefore"></canvas>
+      <div id="compareAfterClip" style="position: absolute; inset: 0; overflow: hidden; width: 50%;">
+        <canvas id="compareCanvasAfter" style="position: absolute; top: 0; left: 0; width: 320px; height: auto;"></canvas>
+      </div>
+      <div class="compare-slider-line" id="compareSliderLine" style="left: 50%;">
+        <div class="compare-slider-handle">
+          <i data-lucide="move-horizontal" class="icon-xs"></i>
+        </div>
+      </div>
+    </div>
+    <p style="font-size: 12px; color: var(--text-subtle); text-align: center;">
+      Drag the slider to inspect facial enhancement, blemish reduction, and edge matting.
+    </p>
   </div>
 </div>
 
@@ -906,6 +1050,10 @@ let cropState = {
 let cachedTileCanvas = null;
 let cachedTileKey = null;
 
+// Multi-photo queue state
+let batchPhotos = [];
+let activeBatchIndex = 0;
+
 // ==========================================
 // DOM REFERENCES
 // ==========================================
@@ -913,6 +1061,11 @@ const dropzone = document.getElementById('dropzone');
 const dropzonePrompt = document.getElementById('dropzonePrompt');
 const fileInput = document.getElementById('fileInput');
 const previewThumb = document.getElementById('previewThumb');
+
+const batchQueueContainer = document.getElementById('batchQueueContainer');
+const batchThumbnails = document.getElementById('batchThumbnails');
+const batchCount = document.getElementById('batchCount');
+const clearBatchBtn = document.getElementById('clearBatchBtn');
 
 const cropSection = document.getElementById('cropSection');
 const cropViewport = document.getElementById('cropViewport');
@@ -951,6 +1104,7 @@ const resetFineTuneBtn = document.getElementById('resetFineTuneBtn');
 const singlePreviewCanvas = document.getElementById('singlePreviewCanvas');
 const singleDimensionLabel = document.getElementById('singleDimensionLabel');
 const downloadSingleBtn = document.getElementById('downloadSingleBtn');
+const compareBtn = document.getElementById('compareBtn');
 
 const sheetCanvas = document.getElementById('sheetCanvas');
 const stagePlaceholder = document.getElementById('stagePlaceholder');
@@ -958,9 +1112,19 @@ const statusBar = document.getElementById('statusBar');
 const sheetInfo = document.getElementById('sheetInfo');
 const downloadSheetJpgBtn = document.getElementById('downloadSheetJpgBtn');
 const downloadSheetPngBtn = document.getElementById('downloadSheetPngBtn');
+const downloadSheetPdfBtn = document.getElementById('downloadSheetPdfBtn');
 const printSheetBtn = document.getElementById('printSheetBtn');
 const modelStatusBadge = document.getElementById('modelStatusBadge');
 const modelStatusText = document.getElementById('modelStatusText');
+
+// Compare modal elements
+const compareModal = document.getElementById('compareModal');
+const closeCompareBtn = document.getElementById('closeCompareBtn');
+const compareCanvasBefore = document.getElementById('compareCanvasBefore');
+const compareCanvasAfter = document.getElementById('compareCanvasAfter');
+const compareAfterClip = document.getElementById('compareAfterClip');
+const compareSliderLine = document.getElementById('compareSliderLine');
+const compareSplitContainer = document.getElementById('compareSplitContainer');
 
 // Helper debounce
 function debounce(fn, ms) {
@@ -996,18 +1160,96 @@ window.addEventListener('DOMContentLoaded', () => {
   });
 });
 dropzone.addEventListener('drop', e => {
-  const file = e.dataTransfer && e.dataTransfer.files[0];
-  if (file) handleImageFile(file);
+  const files = e.dataTransfer && e.dataTransfer.files;
+  if (files && files.length > 0) handleImageFiles([...files]);
 });
 dropzone.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', e => {
-  if (e.target.files && e.target.files[0]) {
-    handleImageFile(e.target.files[0]);
+  if (e.target.files && e.target.files.length > 0) {
+    handleImageFiles([...e.target.files]);
   }
 });
 
-function handleImageFile(file) {
-  if (!file.type.startsWith('image/')) return;
+function handleImageFiles(files) {
+  const imageFiles = files.filter(f => f.type.startsWith('image/'));
+  if (imageFiles.length === 0) return;
+
+  if (imageFiles.length === 1 && batchPhotos.length === 0) {
+    // Single photo flow
+    loadSinglePhotoFile(imageFiles[0]);
+    return;
+  }
+
+  // Multi-photo queue flow
+  batchQueueContainer.style.display = 'block';
+  let loadedCount = 0;
+
+  imageFiles.forEach(file => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const item = {
+        name: file.name,
+        dataUrl: e.target.result,
+        file: file
+      };
+      batchPhotos.push(item);
+      loadedCount++;
+      if (loadedCount === imageFiles.length) {
+        renderBatchThumbnails();
+        // Load the newly added photo or first photo
+        switchBatchPhoto(batchPhotos.length - imageFiles.length);
+      }
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderBatchThumbnails() {
+  batchThumbnails.innerHTML = '';
+  batchCount.textContent = batchPhotos.length;
+  batchPhotos.forEach((item, idx) => {
+    const div = document.createElement('div');
+    div.className = `batch-thumb-item ${idx === activeBatchIndex ? 'active' : ''}`;
+    div.title = item.name;
+    const img = document.createElement('img');
+    img.src = item.dataUrl;
+    div.appendChild(img);
+    div.addEventListener('click', () => switchBatchPhoto(idx));
+    batchThumbnails.appendChild(div);
+  });
+}
+
+function switchBatchPhoto(idx) {
+  if (idx < 0 || idx >= batchPhotos.length) return;
+  activeBatchIndex = idx;
+  renderBatchThumbnails();
+  const item = batchPhotos[idx];
+  const img = new Image();
+  img.onload = () => {
+    loadedImage = img;
+    previewThumb.src = item.dataUrl;
+    previewThumb.style.display = 'block';
+    dropzonePrompt.textContent = `Photo ${idx + 1} of ${batchPhotos.length}`;
+    dropzone.classList.add('has-image');
+    cropImg.src = item.dataUrl;
+    cropSection.style.display = 'block';
+
+    initCropState();
+    updatePresetCountButtons();
+    renderSheet();
+  };
+  img.src = item.dataUrl;
+}
+
+clearBatchBtn.addEventListener('click', () => {
+  batchPhotos = [];
+  activeBatchIndex = 0;
+  batchQueueContainer.style.display = 'none';
+  batchThumbnails.innerHTML = '';
+  batchCount.textContent = '0';
+});
+
+function loadSinglePhotoFile(file) {
   const reader = new FileReader();
   reader.onload = e => {
     const img = new Image();
@@ -1203,7 +1445,7 @@ resetFineTuneBtn.addEventListener('click', () => {
   renderSheet();
 });
 
-// Downloads & Print
+// Downloads, PDF & Print
 downloadSheetJpgBtn.addEventListener('click', () => {
   downloadCanvasAsImage(sheetCanvas, `PhotoPro-Sheet-${currentPaperKey}-${currentCount}photos.jpg`, 'image/jpeg', 0.96);
 });
@@ -1214,6 +1456,76 @@ downloadSingleBtn.addEventListener('click', () => {
   downloadCanvasAsImage(singlePreviewCanvas, `PhotoPro-Single-${currentPhotoSizeKey}.jpg`, 'image/jpeg', 0.96);
 });
 printSheetBtn.addEventListener('click', () => window.print());
+
+downloadSheetPdfBtn.addEventListener('click', () => {
+  if (!window.jspdf || !window.jspdf.jsPDF) {
+    alert('PDF generator is initializing, please try again in a moment.');
+    return;
+  }
+  const { jsPDF } = window.jspdf;
+  const paper = PAPERS[currentPaperKey];
+  const isLandscape = paper.w > paper.h;
+  const doc = new jsPDF({
+    orientation: isLandscape ? 'landscape' : 'portrait',
+    unit: 'mm',
+    format: isLandscape ? [paper.h, paper.w] : [paper.w, paper.h]
+  });
+  const dataUrl = sheetCanvas.toDataURL('image/jpeg', 0.98);
+  doc.addImage(dataUrl, 'JPEG', 0, 0, paper.w, paper.h);
+  doc.save(`PhotoPro-Sheet-${currentPaperKey}-${currentCount}photos.pdf`);
+});
+
+// Compare Before / After Modal Handlers
+let compareDragging = false;
+
+compareBtn.addEventListener('click', () => {
+  if (!loadedImage || !cachedTileCanvas) return;
+  const { wPx, hPx } = getPhotoPxDimensions();
+
+  compareCanvasBefore.width = wPx;
+  compareCanvasBefore.height = hPx;
+  const bCtx = compareCanvasBefore.getContext('2d');
+  bCtx.fillStyle = '#FFFFFF';
+  bCtx.fillRect(0, 0, wPx, hPx);
+  drawTransformedCrop(bCtx, loadedImage, wPx, hPx);
+
+  compareCanvasAfter.width = wPx;
+  compareCanvasAfter.height = hPx;
+  const aCtx = compareCanvasAfter.getContext('2d');
+  aCtx.drawImage(cachedTileCanvas, 0, 0);
+
+  updateCompareSplit(0.5);
+  compareModal.classList.add('open');
+  if (window.lucide) lucide.createIcons({ root: compareModal });
+});
+
+closeCompareBtn.addEventListener('click', () => {
+  compareModal.classList.remove('open');
+});
+compareModal.addEventListener('click', e => {
+  if (e.target === compareModal) compareModal.classList.remove('open');
+});
+
+function updateCompareSplit(ratio) {
+  const clamped = Math.max(0.02, Math.min(0.98, ratio));
+  const pct = (clamped * 100).toFixed(1) + '%';
+  compareAfterClip.style.width = pct;
+  compareSliderLine.style.left = pct;
+}
+
+compareSplitContainer.addEventListener('pointerdown', e => {
+  compareDragging = true;
+  compareSplitContainer.setPointerCapture(e.pointerId);
+  const rect = compareSplitContainer.getBoundingClientRect();
+  updateCompareSplit((e.clientX - rect.left) / rect.width);
+});
+compareSplitContainer.addEventListener('pointermove', e => {
+  if (!compareDragging) return;
+  const rect = compareSplitContainer.getBoundingClientRect();
+  updateCompareSplit((e.clientX - rect.left) / rect.width);
+});
+compareSplitContainer.addEventListener('pointerup', () => { compareDragging = false; });
+compareSplitContainer.addEventListener('pointercancel', () => { compareDragging = false; });
 
 function downloadCanvasAsImage(sourceCanvas, filename, format, quality) {
   const link = document.createElement('a');
@@ -1234,6 +1546,59 @@ function updateCropViewportAspectRatio() {
   }
 }
 
+function detectFaceBounds(img) {
+  try {
+    const sampleW = 160;
+    const sampleH = Math.round((img.height / img.width) * 160);
+    const sc = document.createElement('canvas');
+    sc.width = sampleW;
+    sc.height = sampleH;
+    const sctx = sc.getContext('2d');
+    sctx.drawImage(img, 0, 0, sampleW, sampleH);
+    const data = sctx.getImageData(0, 0, sampleW, sampleH).data;
+
+    let sumX = 0, sumY = 0, count = 0;
+    let minX = sampleW, maxX = 0, minY = sampleH, maxY = 0;
+    const scanLimitH = Math.round(sampleH * 0.75);
+
+    for (let y = 0; y < scanLimitH; y++) {
+      for (let x = 0; x < sampleW; x++) {
+        const idx = (y * sampleW + x) * 4;
+        const r = data[idx], g = data[idx+1], b = data[idx+2];
+        const Y  =  0.299 * r + 0.587 * g + 0.114 * b;
+        const Cb = -0.1687 * r - 0.3313 * g + 0.5 * b + 128;
+        const Cr =  0.5 * r - 0.4187 * g - 0.0813 * b + 128;
+
+        // Skin locus filter
+        if (Y >= 75 && Y <= 235 && Cb >= 82 && Cb <= 135 && Cr >= 135 && Cr <= 182) {
+          sumX += x;
+          sumY += y;
+          count++;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (count > 60) {
+      const scaleX = img.width / sampleW;
+      const scaleY = img.height / sampleH;
+      return {
+        hasFace: true,
+        faceCenterX: (sumX / count) * scaleX,
+        faceCenterY: (sumY / count) * scaleY,
+        faceW: Math.max(30, (maxX - minX) * scaleX),
+        faceH: Math.max(40, (maxY - minY) * scaleY)
+      };
+    }
+  } catch (e) {
+    console.warn('Auto face detection deferred:', e);
+  }
+  return { hasFace: false };
+}
+
 function initCropState() {
   const rect = cropViewport.getBoundingClientRect();
   cropState.vpW = rect.width || 250;
@@ -1241,21 +1606,37 @@ function initCropState() {
   cropState.natW = loadedImage.width;
   cropState.natH = loadedImage.height;
 
-  // Fit image to cover the viewport
+  // Base scale to cover viewport
   cropState.baseScale = Math.max(cropState.vpW / cropState.natW, cropState.vpH / cropState.natH);
-  cropState.zoom = 1;
   cropState.angle = 0;
-  zoomSlider.value = 100;
-  zoomValue.textContent = '100%';
   rotateSlider.value = 0;
   rotateValue.textContent = '0°';
 
-  const renderedW = cropState.natW * cropState.baseScale;
-  const renderedH = cropState.natH * cropState.baseScale;
+  // Automated biometric face detection & framing
+  const face = detectFaceBounds(loadedImage);
+  if (face.hasFace) {
+    // Biometric standard: head height occupies ~70-75% of portrait height
+    const targetFaceH = cropState.vpH * 0.70;
+    const estHeadH = Math.max(face.faceH * 1.25, face.faceW * 1.35);
+    const desiredTotalScale = targetFaceH / estHeadH;
+    cropState.zoom = Math.max(1.0, Math.min(2.4, desiredTotalScale / cropState.baseScale));
 
-  // Center horizontally; bias vertical offset towards upper third so faces center naturally
-  cropState.offsetX = renderedW > cropState.vpW ? (cropState.vpW - renderedW) / 2 : 0;
-  cropState.offsetY = renderedH > cropState.vpH ? (cropState.vpH - renderedH) * 0.28 : 0;
+    const totalScale = cropState.baseScale * cropState.zoom;
+    // Eye/chin axis: align center of face with center of viewport horizontally,
+    // and vertically at ~48% to match the biometric oval
+    cropState.offsetX = (cropState.vpW / 2) - (face.faceCenterX * totalScale);
+    cropState.offsetY = (cropState.vpH * 0.46) - (face.faceCenterY * totalScale);
+  } else {
+    // Standard rule-of-thirds default
+    cropState.zoom = 1;
+    const renderedW = cropState.natW * cropState.baseScale;
+    const renderedH = cropState.natH * cropState.baseScale;
+    cropState.offsetX = renderedW > cropState.vpW ? (cropState.vpW - renderedW) / 2 : 0;
+    cropState.offsetY = renderedH > cropState.vpH ? (cropState.vpH - renderedH) * 0.28 : 0;
+  }
+
+  zoomSlider.value = Math.round(cropState.zoom * 100);
+  zoomValue.textContent = `${Math.round(cropState.zoom * 100)}%`;
 
   clampCropOffsets();
   applyCropTransform();
@@ -2037,6 +2418,7 @@ async function renderSheet() {
     sheetInfo.textContent = `Does not fit on ${paper.name} (${currentCount} photos)`;
     downloadSheetJpgBtn.disabled = true;
     downloadSheetPngBtn.disabled = true;
+    downloadSheetPdfBtn.disabled = true;
     printSheetBtn.disabled = true;
     return;
   }
@@ -2111,7 +2493,9 @@ async function renderSheet() {
   sheetCanvas.style.display = 'block';
   downloadSheetJpgBtn.disabled = false;
   downloadSheetPngBtn.disabled = false;
+  downloadSheetPdfBtn.disabled = false;
   downloadSingleBtn.disabled = false;
+  compareBtn.disabled = false;
   printSheetBtn.disabled = false;
 
   sheetInfo.textContent = `${placed} photos · ${paper.name} · ${photo.name}`;
